@@ -1,6 +1,9 @@
 from typing import List
 from tkinter import *
 import sqlite3
+import datetime
+import time
+import math
 
 window = Tk()
 window.title("My notes")
@@ -10,6 +13,7 @@ current_frame: Frame = None
 frames: List[Frame] = []
 main_frame = Frame(window)
 main_frame.pack(fill=BOTH, expand=True)
+page_history = []
 
 # Will create a singleton of the desired frame
 def set_current_frame(new_frame: type):
@@ -29,6 +33,7 @@ def set_current_frame(new_frame: type):
 
     instance.pack(fill=BOTH, expand=True)
     current_frame = instance
+    page_history.append(new_frame)
 
 class HintedEntry(Entry):
     def __init__(self, parent=None, hint_text="", *args, **kw):
@@ -73,25 +78,43 @@ class StartPage(Frame):
         create_new = Button(self, text="➕ Create new note", command=self.switch_create_page)
         create_new.grid(column=0, row=1, sticky=sticky_all, padx=10, pady=10)
 
-        view_notes = Button(self, text="🔍 Search my notes")
+        view_notes = Button(self, text="🔍 Search my notes", command=self.switch_search_page)
         view_notes.grid(column=1, row=1, sticky=sticky_all, padx=10, pady=10)
 
         recent_title = Label(self, text = "My most recent notes:")
         recent_title.grid(column=0, columnspan=2, row=2, sticky=sticky_all)
 
-        recent_notes = Listbox(self)
-        recent_notes.grid(column=0, columnspan=2, row=3, sticky=sticky_all, padx=5, pady=5)
+        self.recent_notes = Listbox(self)
+        self.recent_notes.bind("<<ListboxSelect>>", self.on_recent_notes_selection)
+        self.recent_notes.grid(column=0, columnspan=2, row=3, sticky=sticky_all, padx=5, pady=5)
+
+        self.update_recent_notes()
 
     def switch_create_page(self):
         set_current_frame(CreatePage)
 
-    def search():
-        pass
+    def switch_search_page(self):
+        set_current_frame(SearchPage)
+
+    def on_recent_notes_selection(self, arg):
+        selection = self.recent_notes.curselection()
+        if not selection:
+            return
+        set_current_frame(NotePage)
+
+    def update_recent_notes(self):
+        cursor.execute("SELECT * FROM Notes ORDER BY date_created DESC")
+        notes = cursor.fetchall()
+        for note in notes:
+            date = datetime.datetime.fromtimestamp(note[0])
+            content = note[1]
+            if (len(content) > 60):
+                content = content[:60] + "..."
+            self.recent_notes.insert("end", f"{date} | {content} | {note[2]}")
 
 class CreatePage(Frame):
     def __init__(self, parent):
         super().__init__(parent)
-
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=3)
         self.grid_rowconfigure(0, weight=1)
@@ -99,36 +122,105 @@ class CreatePage(Frame):
         self.grid_rowconfigure(2, weight=1)
         self.grid_rowconfigure(3, weight=1)
         self.grid_rowconfigure(4, weight=1)
+        self.grid_rowconfigure(5, weight=1)
 
         cancel = Button(self, text="❌", font="20", command=self.cancel_create)
         cancel.grid(column=0, row=0, sticky=(N, W), padx=5, pady=5)
 
-        title = Label(self, text="Create note", font="20")
+        title = Label(self, text="Create new note", font="20")
         title.grid(column=0, row=0, columnspan=2)
 
-        name_label = Label(self, text="Notetaker name")
-        name_label.grid(column=0, row=1)
-        name_entry = HintedEntry(self, hint_text="Enter name")
-        name_entry.grid(column=1, row=1)
+        self.name = StringVar()
+        name_label = Label(self, text="Author name")
+        name_label.grid(column=0, row=1, sticky=W)
+        name_entry = HintedEntry(self, hint_text="Enter name", textvariable=self.name)
+        name_entry.grid(column=1, row=1, sticky=(N,S,W))
 
+        self.tags = StringVar()
         tags_label = Label(self, text="Note tags:")
-        tags_label.grid(column=0, row=2)
-        tags_entry = HintedEntry(self, hint_text="Note tags (separated by , or ' ')")
-        tags_entry.grid(column=1, row=2)
+        tags_label.grid(column=0, row=2, sticky=W)
+        tags_entry = HintedEntry(self, hint_text="Note tags (separated by , or ' ')", textvariable=self.tags)
+        tags_entry.grid(column=1, row=2, sticky=(N,S,W))
 
-        content_label = Label(self, text="Note content:")
-        content_label.grid(column=0, row=3)
-
+        self.content = StringVar()
+        content_label = Label(self, text="Note content:", textvariable=self.content)
+        content_label.grid(column=0, row=3, sticky=W)
         content_entry = Text(self, height=10)
         content_entry.grid(column=0, row=4, columnspan=2, sticky=sticky_all, padx=5, pady=5)
     
+        submit = Button(self, text="Create note", command=self.submit_note)
+        submit.grid(column=1, row=5, sticky=(N,E,S), padx=5, pady=5)
+
+    def submit_note(self):
+        cursor.execute("INSERT INTO Notes (date_created, content, author) VALUES (?, ?, ?)", 
+            (math.floor(time.time()), self.name.get(), self.content.get()))
+        db.commit()
+
+        self.name.set("")
+        self.tags.set("")
+        self.content.set("")
+        self.cancel_create()
+
+
     def cancel_create(self, _=None):
         set_current_frame(StartPage)
 
-    
+class SearchPage(Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1)
+        self.grid_columnconfigure(3, weight=1)
+        self.grid_rowconfigure(0, weight=2)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=20)
+
+        cancel = Button(self, text="❌", font="20", command=self.cancel_search)
+        cancel.grid(column=0, row=0, sticky=(N, W), padx=5, pady=5)
+
+        title = Label(self, text="Search my notes", font="20")
+        title.grid(column=0, row=0, columnspan=4)
+
+        search = HintedEntry(self, hint_text="Search term")
+        search.grid(column=0, row=1, sticky=sticky_all, padx=5)
+        
+        search_by = StringVar(self, "search by")
+        search_by_drop = OptionMenu(self, search_by, "by author", "by content")
+        search_by_drop.grid(column=1, row=1, sticky=sticky_all, padx=5)
+
+        search_tags = HintedEntry(self, hint_text="Include tags (separate by , or ' ')")
+        search_tags.grid(column=2, row=1, sticky=sticky_all)
+
+        search = Button(self, text="Search 🔍")
+        search.grid(column=3, row=1, sticky=sticky_all, padx=5)
+
+        found_notes = Listbox(self)
+        found_notes.grid(column=0, columnspan=4, row=2, sticky=sticky_all, padx=5, pady=5)
+
+    def cancel_search(self, _=None):
+        set_current_frame(StartPage)
+
+class NotePage(Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1)
+        self.grid_columnconfigure(3, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=3)
+
+        cancel = Button(self, text="❌", font="20", command=self.cancel_view)
+        cancel.grid(column=0, row=0, sticky=(N, W), padx=5, pady=5)
+
+    def cancel_view(self, _=None):
+        set_current_frame(page_history[len(page_history) - 2])
+
 # DB Initialisation
-connection = sqlite3.connect("notes.db")
-cursor = connection.cursor()
+db = sqlite3.connect("notes.db")
+cursor = db.cursor()
 
 # Created (unix epoch offset (s))
 cursor.execute("CREATE TABLE IF NOT EXISTS Notes(date_created INTEGER, content TEXT, author TEXT)")
