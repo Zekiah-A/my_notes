@@ -16,24 +16,26 @@ main_frame.pack(fill=BOTH, expand=True)
 page_history = []
 
 # Will create a singleton of the desired frame
-def set_current_frame(new_frame: type):
+def set_current_frame(new_frame_type: type):
     global current_frame
     global frames
     if current_frame != None:
         current_frame.pack_forget()
 
-    instance = None
-    for frame in frames:
-        if (new_frame == type(frame)):
-            instance = frame
+    instance = get_frame_singleton(new_frame_type)
 
     if (instance == None):
-        instance = new_frame(main_frame)
+        instance = new_frame_type(main_frame)
         frames.append(instance)
 
     instance.pack(fill=BOTH, expand=True)
     current_frame = instance
-    page_history.append(new_frame)
+    page_history.append(new_frame_type)
+
+def get_frame_singleton(frame_type: type) -> Frame:
+    for frame in frames:
+        if (frame_type == type(frame)):
+            return frame
 
 class HintedEntry(Entry):
     def __init__(self, parent=None, hint_text="", *args, **kw):
@@ -105,6 +107,8 @@ class StartPage(Frame):
     def update_recent_notes(self):
         cursor.execute("SELECT * FROM Notes ORDER BY date_created DESC")
         notes = cursor.fetchall()
+        self.recent_notes.delete(0, END)
+
         for note in notes:
             date = datetime.datetime.fromtimestamp(note[0])
             content = note[1]
@@ -142,14 +146,24 @@ class CreatePage(Frame):
         tags_entry = HintedEntry(self, hint_text="Note tags (separated by , or ' ')", textvariable=self.tags)
         tags_entry.grid(column=1, row=2, sticky=(N,S,W))
 
-        self.content = StringVar()
-        content_label = Label(self, text="Note content:", textvariable=self.content)
+        content_label = Label(self, text="Note content:")
         content_label.grid(column=0, row=3, sticky=W)
-        content_entry = Text(self, height=10)
-        content_entry.grid(column=0, row=4, columnspan=2, sticky=sticky_all, padx=5, pady=5)
-    
+        self.content = StringVar()
+        self.content.trace_add("write", self.update_content_entry)
+        self.content_entry = Text(self, height=10)
+        self.content_entry.grid(column=0, row=4, columnspan=2, sticky=sticky_all, padx=5, pady=5)
+        self.content_entry.bind("<KeyRelease>", self.update_content)
+
         submit = Button(self, text="Create note", command=self.submit_note)
         submit.grid(column=1, row=5, sticky=(N,E,S), padx=5, pady=5)
+
+    def update_content(self, _=None):
+        text = self.content_entry.get("1.0", "end-1c")
+        self.content.set(text)
+
+    def update_content_entry(self, _=None, _1=None, _2=None):
+        self.content_entry.delete("1.0", END)
+        self.content_entry.insert("1.0", self.content.get())
 
     def submit_note(self):
         cursor.execute("INSERT INTO Notes (date_created, content, author) VALUES (?, ?, ?)", 
@@ -159,8 +173,8 @@ class CreatePage(Frame):
         self.name.set("")
         self.tags.set("")
         self.content.set("")
+        get_frame_singleton(StartPage).update_recent_notes()
         self.cancel_create()
-
 
     def cancel_create(self, _=None):
         set_current_frame(StartPage)
@@ -205,15 +219,21 @@ class NotePage(Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_columnconfigure(2, weight=1)
-        self.grid_columnconfigure(3, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=3)
+        self.grid_rowconfigure(2, weight=8)
 
         cancel = Button(self, text="❌", font="20", command=self.cancel_view)
         cancel.grid(column=0, row=0, sticky=(N, W), padx=5, pady=5)
+
+        title = Label(self, text="Note - NOTENAME", font="20")
+        title.grid(column=0, row=0)
+
+        tags = Label(self, text="Tag1, Tag2, Tag3")
+        tags.grid(column=0, row=1)
+
+        content = Label(self, text="Content content content")
+        content.grid(column=0, row=2, sticky=sticky_all)
 
     def cancel_view(self, _=None):
         set_current_frame(page_history[len(page_history) - 2])
@@ -223,7 +243,10 @@ db = sqlite3.connect("notes.db")
 cursor = db.cursor()
 
 # Created (unix epoch offset (s))
-cursor.execute("CREATE TABLE IF NOT EXISTS Notes(date_created INTEGER, content TEXT, author TEXT)")
+cursor.execute("""CREATE TABLE IF NOT EXISTS Notes(
+    note_id INTEGER PRIMARY KEY NOT NULL, date_created INTEGER, content TEXT, author TEXT);""")
+cursor.execute("""CREATE TABLE IF NOT EXISTS Tags(
+        note_id INTEGER, content TEXT, FOREIGN KEY(note_id) REFERENCES Notes(note_id))""")
 
 # Start
 set_current_frame(StartPage)
