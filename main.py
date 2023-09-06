@@ -58,6 +58,7 @@ def set_current_singleton(new_frame_type: type):
     instance.pack(fill=BOTH, expand=True)
     current_frame = instance
 
+# Can return None
 def get_frame_singleton(frame_type: type) -> Frame:
     for frame in frames:
         if (frame_type == type(frame)):
@@ -219,8 +220,12 @@ class CreatePage(Frame):
         self.tags.set("")
         self.content.set("")
         self.title.set("")
-        get_frame_singleton(StartPage).update_recent_notes()
-        get_frame_singleton(SearchPage).update_notes()
+        start_page = get_frame_singleton(StartPage)
+        if start_page != None:
+            start_page.update_recent_notes()
+        search_page = get_frame_singleton(SearchPage)
+        if search_page != None:
+            search_page.update_notes()
         self.cancel_create()
 
     def cancel_create(self, _=None):
